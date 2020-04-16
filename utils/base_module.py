@@ -3,28 +3,29 @@
 
 import torch.nn as nn
 import torch
+import numpy as np
 
 
 # input: batch_size * nc * 64 * 64
 # output: batch_size * k * 1 * 1
 class Encoder(nn.Module):
-    def __init__(self, isize, nc, k=100, ndf=64):
+    def __init__(self, isize, nc, k=100, ndf=64, bias=False):
         super(Encoder, self).__init__()
         assert isize % 16 == 0, "isize has to be a multiple of 16"
 
         # input is nc x isize x isize
         main = nn.Sequential()
         main.add_module('initial_conv-{0}-{1}'.format(nc, ndf),
-                        nn.Conv2d(nc, ndf, 4, 2, 1, bias=False))
+                        nn.Conv2d(nc, ndf, 5, 1, 2, bias=bias))
         main.add_module('initial_relu-{0}'.format(ndf),
                         nn.LeakyReLU(0.2, inplace=True))
-        csize, cndf = isize / 2, ndf
+        csize, cndf = isize, ndf
 
         while csize > 4:
             in_feat = cndf
             out_feat = cndf * 2
             main.add_module('pyramid-{0}-{1}-conv'.format(in_feat, out_feat),
-                            nn.Conv2d(in_feat, out_feat, 4, 2, 1, bias=False))
+                            nn.Conv2d(in_feat, out_feat, 5, 2, 2, bias=bias))
             main.add_module('pyramid-{0}-batchnorm'.format(out_feat),
                             nn.BatchNorm2d(out_feat))
             main.add_module('pyramid-{0}-relu'.format(out_feat),
@@ -33,12 +34,15 @@ class Encoder(nn.Module):
             csize = csize / 2
 
         main.add_module('final-{0}-{1}-conv'.format(cndf, 1),
-                        nn.Conv2d(cndf, k, 4, 1, 0, bias=False))
+                        nn.Conv2d(cndf, k, 4, 1, 0, bias=bias))
 
         self.main = main
 
     def forward(self, input):
         output = self.main(input)
+        output = output.view([-1, np.prod(output.shape[1:])])
+        # norm = torch.norm(output, dim=1, keepdim=True)
+        # output = output/torch.norm(output, dim=1, keepdim=True)
         return output
 
 
@@ -95,7 +99,7 @@ def weights_init(m):
     if classname.find('Conv') != -1:
         m.weight.data.normal_(0.0, 0.02)
     elif classname.find('BatchNorm') != -1:
-        m.weight.data.normal_(1.0, 0.02)
+        m.weight.data.normal_(0.0, 0.02)
         m.bias.data.fill_(0)
     elif classname.find('Linear') != -1:
         m.weight.data.normal_(0.0, 0.1)
