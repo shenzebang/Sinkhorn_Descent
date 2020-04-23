@@ -149,6 +149,7 @@ if __name__ == '__main__':
 
         print("epoch {0}, μ loss {1:9.3e}, time {2:9.3e}, total time {3:9.3e}".format(epoch, loss, time.time()-time_start,
               time.time() - time_start_0))
+        print("min {0:9.3e} and max {1:9.3e}".format(torch.min(μ), torch.max(μ)))
         # generated images and loss curve
         vutils.save_image(μ, '{}/x_{}.png'.format(args.outf, epoch), normalize=True, nrow=40)
         torch.save(c_encoder.state_dict(), '{}/c_encoder_{}.pt'.format(args.modelf, epoch))
