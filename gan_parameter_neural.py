@@ -20,6 +20,7 @@ import time
 import copy
 import math
 from tqdm import tqdm
+import torch.utils.data as Data
 
 
 if __name__ == '__main__':
@@ -43,9 +44,9 @@ if __name__ == '__main__':
     parser.add_argument('--load_whole_dataset', action='store_true', help='This can deplete GPU memory easily')
 
     args = parser.parse_args()
+    print(args)
 
     cudnn.benchmark = True
-
     args.outf = "tmp/{}".format(args.dataset)
     args.modelf = "model/{}".format(args.dataset)
     args.particlef = "particle/{}".format(args.dataset)
@@ -65,15 +66,20 @@ if __name__ == '__main__':
     backend = "tensorized"
 
     time_start_0 = time.time()
-    # TODO: Implement dataloade
-    if args.load_whole_dataset:
-        dataset = torch.load('{}/{}_transform_{}.pt'.format(args.dataf, args.dataset, IMAGE_SIZE)).to(device)
-    else:
-        dataset = torch.load('{}/{}_transform_{}.pt'.format(args.dataf, args.dataset, IMAGE_SIZE))
+    dataset = torch.load('{}/{}_transform_{}.pt'.format(args.dataf, args.dataset, IMAGE_SIZE))
     N_img, n_channels, IMAGE_SIZE_1, IMAGE_SIZE_2 = dataset.shape
     assert IMAGE_SIZE_1 == IMAGE_SIZE
     assert IMAGE_SIZE_2 == IMAGE_SIZE
     N_loop = int(N_img / args.batch_size)
+    # Load dataset as TensorDataset
+    dataset = Data.TensorDataset(dataset)
+    loader = Data.DataLoader(
+        dataset=dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=8,
+        drop_last=True
+    )
 
     # initialize the decoder
     if args.generator_backend is 'DC-GAN':
@@ -101,10 +107,6 @@ if __name__ == '__main__':
     c_encoder.apply(base_module_high_dim_encoder.weights_init)
     optimizerC = optim.Adam(c_encoder.parameters(), lr=args.lr_encoder, betas=(0.5, 0.9), amsgrad=True)
 
-
-
-
-
     summary(c_encoder, (n_channels, IMAGE_SIZE, IMAGE_SIZE))
     summary(μ_decoder, (decoder_z_features, 1, 1))
 
@@ -117,11 +119,9 @@ if __name__ == '__main__':
         time_start = time.time()
         loss = 0
         G_count = 0
-        for i in tqdm(range(N_loop)):
-            if not args.load_whole_dataset:
-                x_real = dataset[torch.tensor(list(range(i * args.batch_size, (i + 1) * args.batch_size)))].to(device)
-            else:
-                x_real = dataset[torch.tensor(list(range(i * args.batch_size, (i + 1) * args.batch_size)))]
+        i = 0
+        for data in tqdm(loader):
+            x_real = data[0].to(device)
             if i % (args.niterG + 1) == 0:
                 μ_detach = μ_decoder(z.normal_(0, 1)).detach()
                 # --- train the encoder of ground cost:
@@ -130,33 +130,35 @@ if __name__ == '__main__':
                 optimizerC.zero_grad()
                 φ_x_real_1, φ_x_real_2 = c_encoder(x_real).chunk(2, dim=0)
                 φ_μ_1, φ_μ_2 = c_encoder(μ_detach).chunk(2, dim=0)
-                negative_loss = - sinkhorn_divergence(x_real_weight_half, φ_x_real_1, μ_weight_half, φ_μ_1) \
-                                - sinkhorn_divergence(x_real_weight_half, φ_x_real_2, μ_weight_half, φ_μ_2) \
-                                - sinkhorn_divergence(x_real_weight_half, φ_x_real_1, μ_weight_half, φ_μ_2) \
-                                - sinkhorn_divergence(x_real_weight_half, φ_x_real_2, μ_weight_half, φ_μ_1) \
-                                + 2 * sinkhorn_divergence(x_real_weight_half, φ_x_real_1, x_real_weight_half,
-                                                          φ_x_real_2) \
-                                + 2 * sinkhorn_divergence(μ_weight_half, φ_μ_1, μ_weight_half, φ_μ_2)
+                negative_loss = - sinkhorn_divergence(x_real_weight_half, φ_x_real_1, μ_weight_half, φ_μ_1)
+                negative_loss = negative_loss - sinkhorn_divergence(x_real_weight_half, φ_x_real_2, μ_weight_half, φ_μ_2)
+                negative_loss = negative_loss - sinkhorn_divergence(x_real_weight_half, φ_x_real_1, μ_weight_half, φ_μ_2)
+                negative_loss = negative_loss - sinkhorn_divergence(x_real_weight_half, φ_x_real_2, μ_weight_half, φ_μ_1)
+                negative_loss = negative_loss + 2 * sinkhorn_divergence(x_real_weight_half, φ_x_real_1, x_real_weight_half,
+                                                          φ_x_real_2)
+                negative_loss = negative_loss + 2 * sinkhorn_divergence(μ_weight_half, φ_μ_1, μ_weight_half, φ_μ_2)
                 negative_loss.backward()
                 optimizerC.step()
-                del φ_x_real_1, φ_x_real_2, φ_μ_1, φ_μ_2, negative_loss
+                del φ_x_real_1, φ_x_real_2, φ_μ_1, φ_μ_2, negative_loss, μ_detach
+                torch.cuda.empty_cache()
             else:
                 G_count += 1
                 # train the decoder
                 # --- construct the composition function
                 with torch.autograd.no_grad():
                     φ_x_real = c_encoder(x_real)
-                φ_μ_particle = c_encoder(μ_decoder(z.normal_(0, 1)))
-                f_αβ, g_αβ = potential_operator(μ_weight, φ_μ_particle, x_real_weight, φ_x_real)
-                f_αα, _ = potential_operator(μ_weight, φ_μ_particle, μ_weight, φ_μ_particle)
-                g_ββ, _ = potential_operator(x_real_weight, φ_x_real, x_real_weight, φ_x_real)
-                f_αβ_f_αα = f_αβ - f_αα
-                g_αβ_g_ββ = g_αβ - g_ββ
+                    φ_μ_particle = c_encoder(μ_decoder(z.normal_(0, 1)))
+                    f_αβ, g_αβ = potential_operator(μ_weight, φ_μ_particle, x_real_weight, φ_x_real)
+                    f_αα, _ = potential_operator(μ_weight, φ_μ_particle, μ_weight, φ_μ_particle)
+                    g_ββ, _ = potential_operator(x_real_weight, φ_x_real, x_real_weight, φ_x_real)
+                    f_αβ_f_αα = f_αβ - f_αα
+                    g_αβ_g_ββ = g_αβ - g_ββ
 
-                with torch.autograd.no_grad():
+                # with torch.autograd.no_grad():
                     loss += torch.sum(f_αβ_f_αα).item() / args.n_particles + torch.sum(
                         g_αβ_g_ββ).item() / args.batch_size
                 del f_αβ_f_αα, g_αβ_g_ββ, g_ββ
+                torch.cuda.empty_cache()
 
                 loss_fn = torch.nn.MSELoss()
                 μ_decoder_copy = copy.deepcopy(μ_decoder)
@@ -164,22 +166,25 @@ if __name__ == '__main__':
                 # --- update the decoder by regression
                 for _ in range(args.niter_decoder):
                     optimizerμ.zero_grad()
-                    μ_neural = μ_decoder_copy(z_neural.normal_(0, 1))
+                    μ_neural = μ_decoder_copy(z_neural.normal_(0, 1)).detach()
+                    μ_neural.requires_grad_()
                     φ_μ_neural = c_encoder(μ_neural)
                     f_αβ_neural = sinkhorn_potential(μ_weight_neural, φ_μ_neural, x_real_weight, φ_x_real, f_αβ, g_αβ, blur, p, backend=backend)
                     f_αα_neural = sinkhorn_potential(μ_weight_neural, φ_μ_neural, μ_weight, φ_μ_particle, f_αα, f_αα, blur, p, backend=backend)
                     f_αβ_f_αα_neural_gradient = torch.autograd.grad(torch.sum(f_αβ_neural - f_αα_neural), μ_neural)[0]
                     μ_neural = μ_neural - η_g * f_αβ_f_αα_neural_gradient
+                    del f_αβ_neural, f_αα_neural, f_αβ_f_αα_neural_gradient, φ_μ_neural
+                    torch.cuda.empty_cache()
+
                     loss_fn(μ_neural.detach(), μ_decoder(z_neural)).backward()
                     optimizerμ.step()
+                    del μ_neural
+                    torch.cuda.empty_cache()
 
-                del f_αβ, f_αα, g_αβ, φ_x_real, φ_μ_particle, φ_μ_neural, f_αβ_neural, f_αα_neural, \
-                    f_αβ_f_αα_neural_gradient
+                del f_αβ, f_αα, g_αβ, φ_x_real, φ_μ_particle
+                torch.cuda.empty_cache()
 
-
-        # shuffle the data after every epoch
-        rand_perm_index = torch.randperm(N_img)
-        dataset = dataset[rand_perm_index]
+            i += 1
 
         loss /= G_count
         losses.append(loss)
@@ -187,9 +192,8 @@ if __name__ == '__main__':
         print("epoch {0}, μ loss {1:9.3e}, time {2:9.3e}, total time {3:9.3e}".format(epoch, loss, time.time()-time_start,
               time.time() - time_start_0))
         # generated images and loss curve
-        μ_observe = μ_decoder(z_observe)
         nrow = int(math.sqrt(args.n_observe))
-        vutils.save_image(μ_observe, '{}/x_{}.png'.format(args.outf, epoch), normalize=True, nrow=nrow)
+        vutils.save_image(μ_decoder(z_observe), '{}/x_{}.png'.format(args.outf, epoch), normalize=True, nrow=nrow)
         torch.save(c_encoder.state_dict(), '{}/c_encoder_{}.pt'.format(args.modelf, epoch))
         torch.save(μ_decoder.state_dict(), '{}/μ_decoder_{}.pt'.format(args.modelf, epoch))
         fig, ax = plt.subplots()
