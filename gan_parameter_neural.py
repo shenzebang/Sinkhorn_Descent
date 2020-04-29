@@ -111,6 +111,7 @@ if __name__ == '__main__':
     summary(μ_decoder, (decoder_z_features, 1, 1))
 
     losses = []
+    loss_fn = torch.nn.MSELoss()
 
     sinkhorn_divergence = SamplesLoss(loss="sinkhorn", p=p, blur=blur, backend=backend, scaling=scaling)
     potential_operator = SamplesLoss(loss="sinkhorn", p=p, blur=blur, potentials=True, debias=False, backend=backend,
@@ -150,17 +151,16 @@ if __name__ == '__main__':
                     φ_μ_particle = c_encoder(μ_decoder(z.normal_(0, 1)))
                     f_αβ, g_αβ = potential_operator(μ_weight, φ_μ_particle, x_real_weight, φ_x_real)
                     f_αα, _ = potential_operator(μ_weight, φ_μ_particle, μ_weight, φ_μ_particle)
-                    g_ββ, _ = potential_operator(x_real_weight, φ_x_real, x_real_weight, φ_x_real)
-                    f_αβ_f_αα = f_αβ - f_αα
-                    g_αβ_g_ββ = g_αβ - g_ββ
+                    # g_ββ, _ = potential_operator(x_real_weight, φ_x_real, x_real_weight, φ_x_real)
+                    # f_αβ_f_αα = f_αβ - f_αα
+                    # g_αβ_g_ββ = g_αβ - g_ββ
 
                 # with torch.autograd.no_grad():
-                    loss += torch.sum(f_αβ_f_αα).item() / args.n_particles + torch.sum(
-                        g_αβ_g_ββ).item() / args.batch_size
-                del f_αβ_f_αα, g_αβ_g_ββ, g_ββ
-                torch.cuda.empty_cache()
+                #     loss += torch.sum(f_αβ_f_αα).item() / args.n_particles + torch.sum(
+                #         g_αβ_g_ββ).item() / args.batch_size
+                # del f_αβ_f_αα, g_αβ_g_ββ, g_ββ
+                # torch.cuda.empty_cache()
 
-                loss_fn = torch.nn.MSELoss()
                 μ_decoder_copy = copy.deepcopy(μ_decoder)
 
                 # --- update the decoder by regression
@@ -180,8 +180,11 @@ if __name__ == '__main__':
                     optimizerμ.step()
                     del μ_neural
                     torch.cuda.empty_cache()
-
-                del f_αβ, f_αα, g_αβ, φ_x_real, φ_μ_particle
+                with torch.autograd.no_grad():
+                    φ_μ_particle = c_encoder(μ_decoder(z))
+                    loss_G = sinkhorn_divergence(x_real_weight, φ_x_real, μ_weight, φ_μ_particle)
+                    loss += loss_G.item()
+                del f_αβ, f_αα, g_αβ, φ_x_real, φ_μ_particle, loss_G
                 torch.cuda.empty_cache()
 
             i += 1
