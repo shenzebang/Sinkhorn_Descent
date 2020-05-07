@@ -37,3 +37,28 @@ def sinkhorn_potential(α, x, β, y, b_x_particle, a_y_particle, blur, p, backen
         print("unidentified backend")
 
     return b_x_neural
+
+def potential_operator_grad(α, x, β, y, f_x_value, blur, p, backend="tensorized", niter=10):
+    N, D_x = x.shape
+    M, D_y = y.shape
+
+    assert (D_x == D_y)
+    if backend is not "tensorized":
+        print("unidentified backend")
+        return None
+    ε = blur ** p
+    β_log = β.log()
+    α_log = α.log()
+    C_xy = squared_distances(x, y)
+    C_yx = squared_distances(y, x)
+    f_x_value_grad = f_x_value
+    for _ in range(niter):
+        g_y_value_grad = softmin_tensorized(ε, C_yx, (α_log + f_x_value_grad / ε))
+        f_x_value_grad = softmin_tensorized(ε, C_xy, (β_log + g_y_value_grad / ε))
+
+    # perform update in parallel!
+    f_x_value_grad, g_y_value_grad = softmin_tensorized(ε, C_xy, (β_log + g_y_value_grad / ε)), \
+                                     softmin_tensorized(ε, C_yx, (α_log + f_x_value_grad / ε))
+
+    return f_x_value_grad, g_y_value_grad
+
