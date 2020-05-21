@@ -34,13 +34,12 @@ if __name__ == '__main__':
     parser.add_argument('--n_observe', type=int, default=100)
     parser.add_argument('--epochs', type=int, default=4001)
     parser.add_argument('--niterD', type=int, default=1, help='no. updates of D per update of G')
-    parser.add_argument('--niterG', type=int, default=3, help='no. updates of G per update of D')
-    parser.add_argument('--niter_decoder', type=int, default=20, help='no. updates of decoder per update of G')
+    parser.add_argument('--niterG', type=int, default=2, help='no. updates of G per update of D')
     parser.add_argument('--decoder_z_features', type=int, default=64)
-    parser.add_argument('--lr_encoder', type=float, default=5e-4, help='learning rate of c_encoder')
+    parser.add_argument('--lr_encoder', type=float, default=1e-3, help='learning rate of c_encoder')
     parser.add_argument('--lr_decoder', type=float, default=1e-3, help='learning rate of μ_decoder')
-    parser.add_argument('--eta', type=float, default=2, help='step size of the particle update')
-    parser.add_argument('--damping', type=float, default=.1, help='damping parameter of natural gradient')
+    parser.add_argument('--eta', type=float, default=30, help='step size of the particle update')
+    parser.add_argument('--damping', type=float, default=.05, help='damping parameter of natural gradient')
     parser.add_argument('--max_sd', type=float, default=.1, help='maximum allowed sd parameter of natural gradient')
     parser.add_argument('--scaling', type=float, default=.95, help='scaling parameter for the Geomloss package')
     parser.add_argument('--generator_backend', default='DC-GAN', help='NN model of the generator')
@@ -153,30 +152,47 @@ if __name__ == '__main__':
                 # 1. compute the gradient of the free energy
                 f_energy_αβ, _ = potential_operator(μ_weight, φ_μ, x_real_weight, φ_x_real)
                 f_energy_αα, _ = potential_operator(μ_weight, φ_μ, μ_weight, φ_μ)
-                loss_grad = get_flat_params_from(
-                    torch.autograd.grad(torch.sum(f_energy_αβ - f_energy_αα), μ_decoder.parameters()))
-                del φ_x_real, φ_μ, f_energy_αβ, f_energy_αα, x_real
+                grads = torch.autograd.grad(torch.sum(f_energy_αβ - f_energy_αα), μ_decoder.parameters())
+                loss_grad = torch.cat([grad.view(-1) for grad in grads])
+                del φ_μ, f_energy_αβ, f_energy_αα, x_real
                 torch.cuda.empty_cache()
                 # 2. compute the Hessian vector product
+                with torch.autograd.no_grad():
+                    φ_μ = c_encoder(μ_decoder(z))
+                    f_metric_αα_value, g_metric_αα_value = potential_operator(μ_weight, φ_μ, μ_weight, φ_μ)
+                    # print((f_metric_αα_value-g_metric_αα_value).norm())
                 def fvp(v):
-                    φ_μ = c_encoder(μ_decoder(z.normal_(0, 1)))
+                    φ_μ = c_encoder(μ_decoder(z))
+                    # φ_μ = (μ_decoder(z)).view([args.n_particles, -1])
                     # a. compute the sinkhorn potential (value only, no grad_fn)
-                    f_metric_αα_value, _ = potential_operator(μ_weight, φ_μ, μ_weight, φ_μ)
+                    # f_metric_αα_value, _ = potential_operator(μ_weight, φ_μ, μ_weight, φ_μ)
                     # b. compute the sinkhorn potential (including grad_fn)
+                    f_metric_α_α_grad1, g_metric_α_α_grad1 = potential_operator_grad(
+                        μ_weight,
+                        φ_μ,
+                        μ_weight,
+                        φ_μ.detach(),
+                        f_metric_αα_value, g_metric_αα_value,  blur, p, backend=backend, niter=20
+                    )
                     f_metric_α_α_grad, g_metric_α_α_grad = potential_operator_grad(
                         μ_weight,
                         φ_μ,
                         μ_weight,
                         φ_μ.detach(),
-                        f_metric_αα_value.detach(), blur, p, backend=backend
+                        f_metric_α_α_grad1.detach(), g_metric_α_α_grad1.detach(), blur, p, backend=backend, niter=20
                     )
                     f_metric_αα_grad, _ = potential_operator_grad(
                         μ_weight,
                         φ_μ,
                         μ_weight,
                         φ_μ,
-                        f_metric_αα_value.detach(), blur, p, backend=backend
+                        f_metric_α_α_grad.detach(), g_metric_α_α_grad1.detach(), blur, p, backend=backend, niter=10
                     )
+                    # DUBUG: compute the accuracy of sinkhorn iterate
+                    # print('DEBUG in cg')
+                    # print(torch.norm(f_metric_α_α_grad - g_metric_α_α_grad)/ (torch.norm(f_metric_α_α_grad)+1e-7))
+                    # print(torch.norm(f_metric_α_α_grad - f_metric_αα_grad) / (torch.norm(f_metric_α_α_grad)+1e-7))
+                    # print(torch.norm(f_metric_α_α_grad - f_metric_α_α_grad1)/ (torch.norm(f_metric_α_α_grad)+1e-7))
                     # c. compute the Hvp α_ → α
                     sd = torch.sum(f_metric_α_α_grad + g_metric_α_α_grad - f_metric_αα_grad)
                     # there is a missing term g_metric_ββ_grad which is omitted as it does not influence the gradient computation
@@ -189,20 +205,24 @@ if __name__ == '__main__':
 
                     return flat_grad_grad_sd + v * args.damping
 
-                stepdir = conjugate_gradients(fvp, -loss_grad, 10)
+                stepdir = conjugate_gradients(fvp, -loss_grad, 15)
+                # DUBUG: compute the accuracy of CG
+                # print("relative CG residual {}".format(torch.norm(fvp(stepdir)+loss_grad)/torch.norm(loss_grad)))
+                # DUBUG: compute the influence of damping
+                print("similarity between CG step and G step {}".format(stepdir.dot(-loss_grad)/torch.norm(stepdir)/torch.norm(loss_grad)))
                 shs = 0.5 * (stepdir * fvp(stepdir)).sum(0, keepdim=True)
                 lm = torch.sqrt(shs / args.max_sd)
-                fullstep = stepdir / lm[0]
-
+                # print(lm[0])
                 prev_params = get_flat_params_from(μ_decoder)
-                xnew = prev_params + η_g * fullstep
+                xnew = prev_params + η_g/ lm[0] * stepdir
                 set_flat_params_to(μ_decoder, xnew)
 
                 with torch.autograd.no_grad():
                     φ_μ_particle = c_encoder(μ_decoder(z))
                     loss_G = sinkhorn_divergence(x_real_weight, φ_x_real, μ_weight, φ_μ_particle)
                     loss += loss_G.item()
-                del φ_x_real, φ_μ_particle, loss_G, loss_grad, stepdir, fullstep, prev_params, xnew
+                print("epoch {0}, inner loop, μ loss {1:9.3e}".format(epoch, loss_G.item()))
+                del φ_x_real, φ_μ_particle, loss_G, loss_grad, stepdir, prev_params, xnew
                 torch.cuda.empty_cache()
 
             i += 1

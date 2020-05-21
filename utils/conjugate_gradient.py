@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 def conjugate_gradients(Avp, b, nsteps, residual_tol=1e-10):
-    x = torch.zeros(b.size())
+    x = torch.zeros(b.size()).cuda()
     r = b.clone()
     p = b.clone()
     rdotr = torch.dot(r, r)

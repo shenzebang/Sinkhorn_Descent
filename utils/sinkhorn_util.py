@@ -1,6 +1,7 @@
 from geomloss.sinkhorn_samples import softmin_online, keops_lse, log_weights
 from functools import partial
 from geomloss.sinkhorn_samples import squared_distances
+import torch
 cost_formulas = {
     1 : "Norm2(X-Y)",
     2 : "(SqDist(X,Y) / IntCst(2))",
@@ -38,7 +39,7 @@ def sinkhorn_potential(α, x, β, y, b_x_particle, a_y_particle, blur, p, backen
 
     return b_x_neural
 
-def potential_operator_grad(α, x, β, y, f_x_value, blur, p, backend="tensorized", niter=10):
+def potential_operator_grad(α, x, β, y, f_x_value, g_y_value, blur, p, backend="tensorized", niter=10):
     N, D_x = x.shape
     M, D_y = y.shape
 
@@ -52,9 +53,14 @@ def potential_operator_grad(α, x, β, y, f_x_value, blur, p, backend="tensorize
     C_xy = squared_distances(x, y)
     C_yx = squared_distances(y, x)
     f_x_value_grad = f_x_value
+    g_y_value_grad = g_y_value
     for _ in range(niter):
-        g_y_value_grad = softmin_tensorized(ε, C_yx, (α_log + f_x_value_grad / ε))
-        f_x_value_grad = softmin_tensorized(ε, C_xy, (β_log + g_y_value_grad / ε))
+        g_y_value_grad_t = softmin_tensorized(ε, C_yx, (α_log + f_x_value_grad / ε))
+        f_x_value_grad_t = softmin_tensorized(ε, C_xy, (β_log + g_y_value_grad / ε))
+
+        f_x_value_grad = .5*(f_x_value_grad + f_x_value_grad_t)
+        g_y_value_grad = .5*(g_y_value_grad + g_y_value_grad_t)
+        # print(torch.norm(g_y_value_grad - f_x_value_grad) / (torch.norm(f_x_value_grad) + 1e-7))
 
     # perform update in parallel!
     f_x_value_grad, g_y_value_grad = softmin_tensorized(ε, C_xy, (β_log + g_y_value_grad / ε)), \
