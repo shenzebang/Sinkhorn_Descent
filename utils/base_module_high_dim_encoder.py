@@ -39,7 +39,7 @@ class Encoder(nn.Module):
         output = self.main(input)
         output = output.view([-1, np.prod(output.shape[1:])])
         # norm = torch.norm(output, dim=1, keepdim=True)
-        # output = output/torch.norm(output, dim=1, keepdim=True)
+        output = output/torch.norm(output, dim=1, keepdim=True)
         return output
 
 
