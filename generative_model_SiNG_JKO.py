@@ -56,7 +56,7 @@ if __name__ == '__main__':
     p = 2
     blur_loss = .1
     blur_constraint = .1
-    jko_steps = 40
+    jko_steps = 20
     scaling = args.scaling
     decoder_z_features = args.decoder_z_features
     backend = "tensorized"
@@ -105,6 +105,7 @@ if __name__ == '__main__':
     sinkhorn_divergence_con = SamplesLoss(loss="sinkhorn", p=p, blur=blur_constraint, backend=backend, scaling=scaling,
                                           debias=True)
     i = 0
+    time_SiNG = 0
     for epoch in range(args.epochs):
         for data in tqdm(loader):
             time_start = time.time()
@@ -113,7 +114,7 @@ if __name__ == '__main__':
             # 0. construct the discrete approximate by sampling
             with torch.autograd.no_grad():
                 μ_before = μ_decoder(z.normal_(0, 1)).view(args.batch_size, -1)
-            z.normal_(0, 1)
+            # z.normal_(0, 1)
             for i_jko in range(jko_steps):
                 optimizerμ.zero_grad()
                 μ = μ_decoder(z).view(args.batch_size, -1)
@@ -122,6 +123,8 @@ if __name__ == '__main__':
                 loss_jko.backward()
                 optimizerμ.step()
 
+            time_SiNG += time.time() - time_start
+            print(time_SiNG)
             with torch.autograd.no_grad():
                 μ_after = μ_decoder(z).view(args.batch_size, -1)
                 S_delta = sinkhorn_divergence_con(weight, μ_before, weight, μ_after).item()
@@ -132,6 +135,8 @@ if __name__ == '__main__':
 
             writer.add_scalar('generative model loss_blur_{} constraint_blur_{} step_{} jko_steps_{} ng/loss'
                               .format(blur_loss, blur_constraint, η_g, jko_steps), loss_print, i)
+            writer.add_scalar('generative model loss_blur_{} constraint_blur_{} step_{} jko_steps_{} ng/time'
+                              .format(blur_loss, blur_constraint, η_g, jko_steps), time_SiNG, i)
             writer.add_scalar('generative model loss_blur_{} constraint_blur_{} step_{} jko_steps_{} ng/S_delta'
                               .format(blur_loss, blur_constraint, η_g, jko_steps), S_delta,
                               i)
