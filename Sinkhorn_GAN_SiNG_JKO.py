@@ -39,7 +39,7 @@ if __name__ == '__main__':
     parser.add_argument('--decoder_z_features', type=int, default=64)
     parser.add_argument('--lr_encoder', type=float, default=1e-3, help='learning rate of c_encoder')
     parser.add_argument('--lr_decoder', type=float, default=1e-3, help='learning rate of μ_decoder')
-    parser.add_argument('--eta', type=float, default=10, help='step size of the natural gradient update')
+    parser.add_argument('--eta', type=float, default=1, help='step size of the natural gradient update')
     parser.add_argument('--damping', type=float, default=.05, help='damping parameter of natural gradient')
     parser.add_argument('--max_sd', type=float, default=.1, help='maximum allowed sd parameter of natural gradient')
     parser.add_argument('--scaling', type=float, default=.95, help='scaling parameter for the Geomloss package')
@@ -152,7 +152,7 @@ if __name__ == '__main__':
                 with torch.autograd.no_grad():
                     φ_μ_before = c_encoder(μ_decoder(z.normal_(0, 1)))
                     φ_x_real = c_encoder(x_real)
-                z.normal_(0, 1)
+                # z.normal_(0, 1)
                 for i_jko in range(jko_steps):
                     optimizerμ.zero_grad()
                     φ_μ = c_encoder(μ_decoder(z))
@@ -184,8 +184,8 @@ if __name__ == '__main__':
 
 
                 nrow = int(math.sqrt(args.n_observe))
-                if i % 10 == 0:
-                    vutils.save_image(μ_decoder(z_observe), '{}/x_{}.png'.format(args.outf, i), normalize=True,
+                # if i % 10 == 0:
+                vutils.save_image(μ_decoder(z_observe), '{}/x_{}.png'.format(args.outf, i), normalize=True,
                                   nrow=nrow)
 
             i += 1
