@@ -7,7 +7,7 @@ import os
 import sys
 
 script_path = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(script_path,'..'))
+sys.path.append(os.path.join(script_path, '../..'))
 
 from core.sinkhorn_barycenter_weight import SinkhornBarycenterWeight
 import numpy

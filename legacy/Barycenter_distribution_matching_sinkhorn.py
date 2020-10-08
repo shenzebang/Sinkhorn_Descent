@@ -14,11 +14,11 @@ import sys
 from core.sinkhorn_barycenter_weight import SinkhornBarycenterWeight
 from utils.plot_utils import plot
 script_path = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(script_path,'..'))
+sys.path.append(os.path.join(script_path, '../..'))
 
 
-data_path = os.path.join(script_path, 'data', 'matching', 'cheetah.jpg')
-save_path = os.path.join(script_path,'out','matching')
+data_path = os.path.join(script_path, '../data', 'matching', 'cheetah.jpg')
+save_path = os.path.join(script_path, '../out', 'matching')
 plot_save_path = os.path.join(script_path, 'plot', 'matching')
 os.system('mkdir -p {}'.format(save_path))
 

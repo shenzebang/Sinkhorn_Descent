@@ -22,6 +22,11 @@ def plot(point, weights, bins=50, thresh=0):
     plt.hist2d(xb, yb, bins=[bins, bins], weights=wb)
     return xb, yb
 
+def plot2(point, weights, binx, biny, thresh=0):
+    xb, yb, wb = pre_histogram(point, weights, thresh=thresh)
+    plt.hist2d(xb, yb, bins=[binx, biny], weights=wb)
+    return xb, yb
+
 
 def plotd(d, bins=50, thresh=0):
     return plot(d.support,d.weights,bins=bins,thresh=thresh)

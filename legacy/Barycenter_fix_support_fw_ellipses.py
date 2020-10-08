@@ -6,14 +6,14 @@ import os
 import sys
 
 script_path = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(script_path,'..'))
+sys.path.append(os.path.join(script_path, '../..'))
 
 from core.fix_support_sinkhorn_barycenter import FixSupportSinkhornBarycenter
 
 
 
-data_path = os.path.join(script_path, 'data', 'Ellipses.pckl')
-save_path = os.path.join(script_path,'out','ellipses')
+data_path = os.path.join(script_path, '../data', 'Ellipses.pckl')
+save_path = os.path.join(script_path, '../out', 'ellipses')
 # ==============================================================================================================
 #   load the file containing the ellipses support and weights
 # ==============================================================================================================

@@ -7,14 +7,14 @@ import os
 import sys
 
 script_path = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(script_path,'..'))
+sys.path.append(os.path.join(script_path, '../..'))
 
 from core.sinkhorn_barycenter import SinkhornBarycenter
 import numpy
 from utils.plot_utils import plot
 
-data_path = os.path.join(script_path, 'data', 'ellipses', 'Ellipses.pckl')
-save_path = os.path.join(script_path, 'out', 'ellipses')
+data_path = os.path.join(script_path, '../data', 'ellipses', 'Ellipses.pckl')
+save_path = os.path.join(script_path, '../out', 'ellipses')
 plot_save_path = os.path.join(script_path, 'plot', 'ellipses')
 os.system('mkdir -p {}'.format(save_path))
 

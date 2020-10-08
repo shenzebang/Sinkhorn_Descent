@@ -1,21 +1,26 @@
 import torch
 torch.set_default_tensor_type(torch.DoubleTensor)
-from matplotlib import pyplot as plt
 import pickle
 
 import os
 import sys
-
-script_path = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(script_path,'..'))
-
-from core.sinkhorn_barycenter import SinkhornBarycenter
 import numpy
+from matplotlib import pyplot as plt
+
+from torch.utils.tensorboard import SummaryWriter
+script_path = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(script_path, '../..'))
+
+from core.fix_support_sinkhorn_barycenter import FixSupportSinkhornBarycenter
 
 
-data_path = os.path.join(script_path, 'data', 'Ellipses.pckl')
-save_path = os.path.join(script_path, 'out', 'ellipses')
-plot_save_path = os.path.join(script_path, 'plot', 'ellipses')
+problem_name = 'ellipses'
+algorithm_name = 'fix_support'
+
+data_path = os.path.join(script_path, 'data/ellipses', 'Ellipses.pckl')
+save_path = os.path.join(script_path, 'output/barycenter/ellipses', 'ellipses')
+plot_save_path = os.path.join(script_path, 'plot/barycenter/ellipses/fix_support', 'ellipses')
+
 # ==============================================================================================================
 #   load the file containing the ellipses support and weights
 # ==============================================================================================================
@@ -31,27 +36,27 @@ X, Y = torch.meshgrid(X, Y)
 X1 = X.reshape(X.shape[0] ** 2)
 Y1 = Y.reshape(Y.shape[0] ** 2)
 
-source_distributions = []
-
+source_distributions_supports = []
+source_distributions_weights = []
 n = len(pre_supp)   # number of source measures
-m = 320             # support size of initial measures
+m = 600             # support size of initial measures
 d = 2
+frequency_loss_evaluation = 10
 for i in range(n):
-    supp = torch.zeros((pre_supp[i].shape[0], 2), requires_grad=True, dtype=torch.float32).cuda()
+    supp = torch.zeros((pre_supp[i].shape[0], 2), dtype=torch.float32).cuda()
     supp[:, 0] = X1[pre_supp[i]]
     supp[:, 1] = Y1[pre_supp[i]]
-    weights = (1 / pre_supp[i].shape[0]) * torch.ones(pre_supp[i].shape[0], 1)
-    source_distributions.append(supp)
-
-barycenter_initial = torch.rand(m, d, requires_grad=True, dtype=torch.float32).cuda()
+    weights = ((1 / pre_supp[i].shape[0]) * torch.ones(pre_supp[i].shape[0], dtype=torch.float32)).cuda()
+    source_distributions_supports.append(supp)
+    source_distributions_weights.append(weights)
 
 # ==============================================================================================================
 #   compute Sinkhorn barycenter via Sinkhorn Descent
 # ==============================================================================================================
 
-step_size = 1e-0  # step size
+step_size = 1e0  # step size
 nit = 500  # number of iterations
-frequency_loss_evaluation = 10  # the frequency to evaluate the loos
+
 try:
     from pykeops.torch import generic_sum, generic_logsumexp
 
@@ -59,27 +64,24 @@ try:
 except ImportError:
     backend = "pytorch"  # Vanilla torch backend. Beware of memory overflows above ~10,000 samples!
 
-# barycenter = SinkhornBarycenter(source_distributions, barycenter_initial, step_size, backend="pytorch")
-barycenter = SinkhornBarycenter(source_distributions, barycenter_initial, step_size, backend=backend)
+barycenter = FixSupportSinkhornBarycenter(source_distributions_supports, source_distributions_weights,
+                        step_size, backend=backend)  # support and weights of the barycenter is automatically determined
 fig = plt.figure()
 ax = fig.gca()
-
-# ==============================================================================================================
-#   store the losses for plotting
-# ==============================================================================================================
 loss_vector = numpy.zeros(numpy.int(nit/frequency_loss_evaluation))
 iter_vector = numpy.arange(0, nit, frequency_loss_evaluation)+1
 
-
+# fig = plt.figure()
+# ax = fig.gca()
 for i in range(nit):
-    barycenter.step()
+    loss = barycenter.step()
     if i % frequency_loss_evaluation == 0:
-        barycenter_plot = torch.Tensor.cpu(barycenter.barycenter).detach().numpy()
-        ax.scatter(barycenter_plot[:, 0], barycenter_plot[:, 1])
-        plt.savefig(os.path.join(save_path, 'barycenter_{}.png'.format(i)))
-        ax.clear()
+        # barycenter_plot = torch.Tensor.cpu(barycenter.barycenter_support).detach().numpy()
+        # ax.scatter(barycenter_plot[:, 0], barycenter_plot[:, 1])
+        # plt.savefig(os.path.join(save_path, 'barycenter_{}.png'.format(i)))
+        # ax.clear()
         loss = barycenter.evaluate()
-        loss_vector[numpy.int(i/frequency_loss_evaluation)] = loss
+        loss_vector[numpy.int(i / frequency_loss_evaluation)] = loss
         print("iteration {}, loss {}".format(i, loss))
 
-numpy.savetxt(os.path.join(plot_save_path, "SD_ellipses_nparticle{}".format(m)), numpy.vstack((iter_vector, loss_vector)))
+numpy.savetxt(os.path.join(plot_save_path, "FS_ellipses_nparticle{}".format(m)), numpy.vstack((iter_vector, loss_vector)))

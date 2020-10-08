@@ -4,6 +4,8 @@ This repository contains two projects:
 
 # Sinkhorn Barycenter via Functional Gradient Descent
 
+To run SD on MNIST, please first run MNIST_to_measure.py for data preprocessing.
+
 #### Dependencies
 ```
 geomloss
@@ -16,7 +18,7 @@ The following baselines are included:
 * Gradual GAN
 * MMD GAN
 * OT GAN
-
+* Wasserstein GAN
 #### Dependencies
 ```
 geomloss
